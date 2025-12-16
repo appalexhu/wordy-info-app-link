@@ -1,0 +1,547 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Wordy App</title>
+    <script>
+        // Detect if user is on Android or iOS
+        function isAndroid() {
+            const userAgent = navigator.userAgent || navigator.vendor || window.opera;
+            return /android/i.test(userAgent);
+        }
+        
+        function isIOS() {
+            const userAgent = navigator.userAgent || navigator.vendor || window.opera;
+            
+            // Check for iOS devices (including TikTok in-app browser)
+            if (/iPhone|iPad|iPod/.test(userAgent) && !window.MSStream) {
+                console.log('iOS detected via iPhone/iPad/iPod in UA');
+                return true;
+            }
+            
+            // Check for BytedanceWebview + iPhone OS (TikTok iOS specific pattern)
+            if (/BytedanceWebview/i.test(userAgent) && /iPhone OS/i.test(userAgent)) {
+                console.log('TikTok iOS detected (BytedanceWebview + iPhone OS)');
+                return true;
+            }
+            
+            // Check for musical_ly (TikTok's old name) + iPhone OS
+            if (/musical_ly/i.test(userAgent) && /iPhone OS/i.test(userAgent)) {
+                console.log('TikTok iOS detected (musical_ly + iPhone OS)');
+                return true;
+            }
+            
+            // Check for BytedanceWebview without Android = likely iOS
+            if (/BytedanceWebview/i.test(userAgent) && !/Android/i.test(userAgent)) {
+                console.log('BytedanceWebview detected, not Android - assuming iOS');
+                return true;
+            }
+            
+            // Check for iPad on iOS 13+ (reports as Mac)
+            if (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1) {
+                return true;
+            }
+            
+            // Check iOS via platform
+            if (navigator.platform && /iPhone|iPod|iPad/.test(navigator.platform)) {
+                return true;
+            }
+            
+            return false;
+        }
+        
+        // Store detection globally
+        const IS_ANDROID = isAndroid();
+        const IS_IOS = isIOS();
+        
+        // Debug info
+        console.log('User Agent:', navigator.userAgent);
+        console.log('Platform:', navigator.platform);
+        console.log('Vendor:', navigator.vendor);
+        console.log('IS_ANDROID:', IS_ANDROID);
+        console.log('IS_IOS:', IS_IOS);
+        
+        // Campaign-based OneLink routing (matching AppsFlyer setup)
+        const ONELINK_CAMPAIGNS = {
+            'wordyapp': 'https://app.wordy.info/0206/wordyapp',
+            'wordymagyar': 'https://app.wordy.info/0206/wordymagyar',
+            'gaby': 'https://app.wordy.info/0206/gaby',
+            'speakeasymatyastt': 'https://app.wordy.info/0206/speakeasymatyastt',
+            'language_learning_wordy': 'https://app.wordy.info/0206/language_learning_wordy',
+            // Add more campaigns here as needed
+            'default': 'https://app.wordy.info/0206/default'
+        };
+        
+        let finalURL = '';
+        
+        // Initialize routing based on platform and campaign
+        (function() {
+            const urlParams = new URLSearchParams(window.location.search);
+            const campaign = urlParams.get('campaign') || urlParams.get('c') || 'default';
+            
+            if (IS_IOS) {
+                // iOS: Direct App Store link to avoid TikTok blocking
+                finalURL = 'https://apps.apple.com/us/app/learn-languages-wordy/id6670703228';
+                console.log('Platform:', 'iOS (TikTok safe mode)');
+                console.log('iOS detected: Using direct App Store link');
+                
+                // Send tracking data to AppsFlyer S2S API
+                // Map specific campaigns to their media sources, default to Social_tiktok for unknown campaigns
+                const campaignMediaSources = {
+                    'language_learning_wordy': 'Social_instagram'
+                    // All other campaigns default to Social_tiktok
+                };
+                
+                const mediaSource = campaignMediaSources[campaign.toLowerCase()] || urlParams.get('pid') || 'Social_tiktok';
+                
+                const trackingData = {
+                    app_id: 'id6670703228',
+                    media_source: mediaSource,
+                    campaign: campaign,
+                    af_channel: urlParams.get('af_channel') || 'social',
+                    af_ad: urlParams.get('af_ad') || 'bio_link',
+                    af_siteid: window.location.hostname,
+                    click_time: new Date().toISOString(),
+                    user_agent: navigator.userAgent,
+                    ip: 'auto' // AppsFlyer will detect from request
+                };
+                
+                // Option 1: AppsFlyer Click API (no auth needed)
+                const clickUrl = `https://impression.appsflyer.com/${trackingData.app_id}/click`;
+                const clickParams = new URLSearchParams({
+                    pid: trackingData.media_source,
+                    c: trackingData.campaign,
+                    af_channel: trackingData.af_channel,
+                    af_ad: trackingData.af_ad,
+                    af_siteid: trackingData.af_siteid,
+                    clickid: Date.now().toString()
+                });
+                
+                // Send click event via invisible pixel
+                const img = new Image(1, 1);
+                img.src = clickUrl + '?' + clickParams.toString();
+                img.style.display = 'none';
+                document.body.appendChild(img);
+                
+                // Option 2: Store campaign data in URL parameters for App Store
+                // Apple's App Store Analytics campaign tracking
+                const storeParams = new URLSearchParams({
+                    ct: campaign, // Campaign token
+                    mt: '8' // Media type (8 = Web)
+                });
+                
+                // Only add pt if you have Apple Provider Token
+                // pt: 'YOUR_TEAM_ID', // Uncomment and add your Team ID if you have it
+                
+                // Add campaign parameters to App Store URL
+                if (campaign !== 'default') {
+                    finalURL = finalURL + '&' + storeParams.toString();
+                }
+                
+                console.log('AppsFlyer tracking sent for iOS:', trackingData);
+            } else {
+                // Android and others: Use OneLink for tracking
+                // Check if campaign exists in predefined list, otherwise use default with campaign parameter
+                if (ONELINK_CAMPAIGNS[campaign.toLowerCase()]) {
+                    finalURL = ONELINK_CAMPAIGNS[campaign.toLowerCase()];
+                } else {
+                    // Use default OneLink but pass the campaign as parameter
+                    finalURL = ONELINK_CAMPAIGNS['default'];
+                }
+                
+                // Add any additional parameters to pass through to OneLink
+                const passThroughParams = {};
+                
+                // Always include the campaign name
+                passThroughParams.c = campaign;
+                
+                // Common AppsFlyer parameters to pass through
+                const allowedParams = ['pid', 'af_channel', 'af_ad', 'af_adset', 'af_sub1', 'af_sub2', 'af_sub3', 'af_sub4', 'af_sub5'];
+                
+                for (let [key, value] of urlParams) {
+                    if (allowedParams.includes(key) || key.startsWith('af_')) {
+                        passThroughParams[key] = value;
+                    }
+                }
+                
+                // Add default pid if not provided
+                if (!passThroughParams.pid) {
+                    passThroughParams.pid = 'tiktok_bio';
+                }
+                
+                // Build final URL with parameters
+                finalURL = finalURL + '?' + new URLSearchParams(passThroughParams).toString();
+                
+                console.log('Platform:', 'Android/Desktop');
+                console.log('Campaign:', campaign);
+                console.log('OneLink URL:', finalURL);
+            }
+        })();
+        
+        const translations = {
+            'en': {
+                title: IS_ANDROID ? 'Search "Wordy" on Google Play' : 'Search "Wordy" on the App Store',
+                download: 'Download App',
+                popup: 'On <span class="tiktok-icon"></span> you need to tap on the <span class="three-dots"></span> and then tap on <span class="highlight">"Open in browser"</span> to download the app for free.'
+            },
+            'ar': {
+                title: IS_ANDROID ? 'ابحث عن "Wordy" في Google Play' : 'ابحث عن "Wordy" في App Store',
+                download: 'تحميل التطبيق',
+                popup: 'في <span class="tiktok-icon"></span> تحتاج إلى النقر على <span class="three-dots"></span> ثم النقر على <span class="highlight">"فتح في المتصفح"</span> لتحميل التطبيق مجانًا.'
+            },
+            'ca': {
+                title: IS_ANDROID ? 'Cerca "Wordy" a Google Play' : 'Cerca "Wordy" a l\'App Store',
+                download: 'Descarregar App',
+                popup: 'A <span class="tiktok-icon"></span> has de tocar <span class="three-dots"></span> i després tocar <span class="highlight">"Obrir al navegador"</span> per descarregar l\'aplicació gratuïtament.'
+            },
+            'zh_cn': {
+                title: IS_ANDROID ? '在Google Play搜索"Wordy"' : '在App Store搜索"Wordy"',
+                download: '下载应用',
+                popup: '在<span class="tiktok-icon"></span>上，您需要点击<span class="three-dots"></span>然后点击<span class="highlight">"在浏览器中打开"</span>来免费下载应用。'
+            },
+            'zh_tw': {
+                title: IS_ANDROID ? '在Google Play搜尋"Wordy"' : '在App Store搜尋"Wordy"',
+                download: '下載應用程式',
+                popup: '在<span class="tiktok-icon"></span>上，您需要點擊<span class="three-dots"></span>然後點擊<span class="highlight">"在瀏覽器中開啟"</span>來免費下載應用程式。'
+            },
+            'hr': {
+                title: IS_ANDROID ? 'Pretražite "Wordy" na Google Play' : 'Pretražite "Wordy" u App Store',
+                download: 'Preuzmi aplikaciju',
+                popup: 'Na <span class="tiktok-icon"></span> trebate dodirnuti <span class="three-dots"></span> i zatim dodirnuti <span class="highlight">"Otvori u pregledniku"</span> za besplatno preuzimanje aplikacije.'
+            },
+            'cs': {
+                title: IS_ANDROID ? 'Hledejte "Wordy" v Google Play' : 'Hledejte "Wordy" v App Store',
+                download: 'Stáhnout aplikaci',
+                popup: 'Na <span class="tiktok-icon"></span> musíte klepnout na <span class="three-dots"></span> a pak klepnout na <span class="highlight">"Otevřít v prohlížeči"</span> pro bezplatné stažení aplikace.'
+            },
+            'da': {
+                title: IS_ANDROID ? 'Søg efter "Wordy" i Google Play' : 'Søg efter "Wordy" i App Store',
+                download: 'Download App',
+                popup: 'På <span class="tiktok-icon"></span> skal du trykke på <span class="three-dots"></span> og derefter trykke på <span class="highlight">"Åbn i browser"</span> for at downloade appen gratis.'
+            },
+            'nl': {
+                title: IS_ANDROID ? 'Zoek "Wordy" in Google Play' : 'Zoek "Wordy" in de App Store',
+                download: 'Download App',
+                popup: 'Op <span class="tiktok-icon"></span> moet je tikken op <span class="three-dots"></span> en dan tikken op <span class="highlight">"Openen in browser"</span> om de app gratis te downloaden.'
+            },
+            'fi': {
+                title: IS_ANDROID ? 'Hae "Wordy" Google Playsta' : 'Hae "Wordy" App Storesta',
+                download: 'Lataa sovellus',
+                popup: '<span class="tiktok-icon"></span>:ssa sinun täytyy napauttaa <span class="three-dots"></span> ja sitten napauttaa <span class="highlight">"Avaa selaimessa"</span> ladataksesi sovelluksen ilmaiseksi.'
+            },
+            'fr': {
+                title: IS_ANDROID ? 'Recherchez "Wordy" sur Google Play' : 'Recherchez "Wordy" sur l\'App Store',
+                download: 'Télécharger l\'app',
+                popup: 'Sur <span class="tiktok-icon"></span> vous devez appuyer sur <span class="three-dots"></span> puis appuyer sur <span class="highlight">"Ouvrir dans le navigateur"</span> pour télécharger l\'application gratuitement.'
+            },
+            'de': {
+                title: IS_ANDROID ? 'Suche "Wordy" bei Google Play' : 'Suche "Wordy" im App Store',
+                download: 'App herunterladen',
+                popup: 'Auf <span class="tiktok-icon"></span> müssen Sie auf <span class="three-dots"></span> tippen und dann auf <span class="highlight">"Im Browser öffnen"</span> tippen, um die App kostenlos herunterzuladen.'
+            },
+            'el': {
+                title: IS_ANDROID ? 'Αναζητήστε "Wordy" στο Google Play' : 'Αναζητήστε "Wordy" στο App Store',
+                download: 'Λήψη εφαρμογής',
+                popup: 'Στο <span class="tiktok-icon"></span> πρέπει να πατήσετε <span class="three-dots"></span> και μετά να πατήσετε <span class="highlight">"Άνοιγμα στον browser"</span> για να κατεβάσετε την εφαρμογή δωρεάν.'
+            },
+            'he': {
+                title: IS_ANDROID ? 'חפש "Wordy" ב-Google Play' : 'חפש "Wordy" ב-App Store',
+                download: 'הורד אפליקציה',
+                popup: 'ב-<span class="tiktok-icon"></span> עליך להקיש על <span class="three-dots"></span> ואז להקיש על <span class="highlight">"פתח בדפדפן"</span> כדי להוריד את האפליקציה בחינם.'
+            },
+            'hi': {
+                title: IS_ANDROID ? 'Google Play में "Wordy" खोजें' : 'App Store में "Wordy" खोजें',
+                download: 'ऐप डाउनलोड करें',
+                popup: '<span class="tiktok-icon"></span> पर आपको <span class="three-dots"></span> पर टैप करना होगा और फिर मुफ्त में ऐप डाउनलोड करने के लिए <span class="highlight">"ब्राउज़र में खोलें"</span> पर टैप करना होगा।'
+            },
+            'hu': {
+                title: IS_ANDROID ? 'Keresd a "Wordy"-t a Google Play-en' : 'Keresd a "Wordy"-t az App Store-ban',
+                download: 'Alkalmazás letöltése',
+                popup: 'A <span class="tiktok-icon"></span>-on rá kell koppintanod a <span class="three-dots"></span> gombra, majd a <span class="highlight">"Megnyitás böngészőben"</span> opcióra az alkalmazás ingyenes letöltéséhez.'
+            },
+            'id': {
+                title: IS_ANDROID ? 'Cari "Wordy" di Google Play' : 'Cari "Wordy" di App Store',
+                download: 'Unduh Aplikasi',
+                popup: 'Di <span class="tiktok-icon"></span> Anda perlu mengetuk <span class="three-dots"></span> lalu ketuk <span class="highlight">"Buka di browser"</span> untuk mengunduh aplikasi secara gratis.'
+            },
+            'it': {
+                title: IS_ANDROID ? 'Cerca "Wordy" su Google Play' : 'Cerca "Wordy" nell\'App Store',
+                download: 'Scarica l\'app',
+                popup: 'Su <span class="tiktok-icon"></span> devi toccare <span class="three-dots"></span> e poi toccare <span class="highlight">"Apri nel browser"</span> per scaricare l\'app gratuitamente.'
+            },
+            'ja': {
+                title: IS_ANDROID ? 'Google Playで「Wordy」を検索' : 'App Storeで「Wordy」を検索',
+                download: 'アプリをダウンロード',
+                popup: '<span class="tiktok-icon"></span>では<span class="three-dots"></span>をタップしてから<span class="highlight">「ブラウザで開く」</span>をタップして、アプリを無料でダウンロードしてください。'
+            },
+            'ko': {
+                title: IS_ANDROID ? 'Google Play에서 "Wordy" 검색' : 'App Store에서 "Wordy" 검색',
+                download: '앱 다운로드',
+                popup: '<span class="tiktok-icon"></span>에서 <span class="three-dots"></span>를 탭한 다음 <span class="highlight">"브라우저에서 열기"</span>를 탭하여 앱을 무료로 다운로드하세요.'
+            },
+            'ms': {
+                title: IS_ANDROID ? 'Cari "Wordy" di Google Play' : 'Cari "Wordy" di App Store',
+                download: 'Muat turun Aplikasi',
+                popup: 'Di <span class="tiktok-icon"></span> anda perlu ketik <span class="three-dots"></span> dan kemudian ketik <span class="highlight">"Buka dalam pelayar"</span> untuk memuat turun aplikasi secara percuma.'
+            },
+            'no': {
+                title: IS_ANDROID ? 'Søk etter "Wordy" i Google Play' : 'Søk etter "Wordy" i App Store',
+                download: 'Last ned app',
+                popup: 'På <span class="tiktok-icon"></span> må du trykke på <span class="three-dots"></span> og deretter trykke på <span class="highlight">"Åpne i nettleser"</span> for å laste ned appen gratis.'
+            },
+            'pl': {
+                title: IS_ANDROID ? 'Szukaj "Wordy" w Google Play' : 'Szukaj "Wordy" w App Store',
+                download: 'Pobierz aplikację',
+                popup: 'Na <span class="tiktok-icon"></span> musisz dotknąć <span class="three-dots"></span> a następnie dotknąć <span class="highlight">"Otwórz w przeglądarce"</span> aby pobrać aplikację za darmo.'
+            },
+            'pt': {
+                title: IS_ANDROID ? 'Procure "Wordy" no Google Play' : 'Procure "Wordy" na App Store',
+                download: 'Baixar aplicativo',
+                popup: 'No <span class="tiktok-icon"></span> você precisa tocar em <span class="three-dots"></span> e depois tocar em <span class="highlight">"Abrir no navegador"</span> para baixar o aplicativo gratuitamente.'
+            },
+            'ro': {
+                title: IS_ANDROID ? 'Căutați "Wordy" în Google Play' : 'Căutați "Wordy" în App Store',
+                download: 'Descărcați aplicația',
+                popup: 'Pe <span class="tiktok-icon"></span> trebuie să atingeți <span class="three-dots"></span> și apoi să atingeți <span class="highlight">"Deschide în browser"</span> pentru a descărca aplicația gratuit.'
+            },
+            'ru': {
+                title: IS_ANDROID ? 'Найдите "Wordy" в Google Play' : 'Найдите "Wordy" в App Store',
+                download: 'Скачать приложение',
+                popup: 'В <span class="tiktok-icon"></span> вам нужно нажать на <span class="three-dots"></span> а затем нажать <span class="highlight">"Открыть в браузере"</span> чтобы скачать приложение бесплатно.'
+            },
+            'sk': {
+                title: IS_ANDROID ? 'Hľadajte "Wordy" v Google Play' : 'Hľadajte "Wordy" v App Store',
+                download: 'Stiahnuť aplikáciu',
+                popup: 'Na <span class="tiktok-icon"></span> musíte ťuknúť na <span class="three-dots"></span> a potom ťuknúť na <span class="highlight">"Otvoriť v prehliadači"</span> na bezplatné stiahnutie aplikácie.'
+            },
+            'es': {
+                title: IS_ANDROID ? 'Busca "Wordy" en Google Play' : 'Busca "Wordy" en la App Store',
+                download: 'Descargar App',
+                popup: 'En <span class="tiktok-icon"></span> debes tocar <span class="three-dots"></span> y luego tocar <span class="highlight">"Abrir en el navegador"</span> para descargar la aplicación gratis.'
+            },
+            'sv': {
+                title: IS_ANDROID ? 'Sök efter "Wordy" på Google Play' : 'Sök efter "Wordy" i App Store',
+                download: 'Ladda ner app',
+                popup: 'På <span class="tiktok-icon"></span> måste du trycka på <span class="three-dots"></span> och sedan trycka på <span class="highlight">"Öppna i webbläsare"</span> för att ladda ner appen gratis.'
+            },
+            'th': {
+                title: IS_ANDROID ? 'ค้นหา "Wordy" ใน Google Play' : 'ค้นหา "Wordy" ใน App Store',
+                download: 'ดาวน์โหลดแอป',
+                popup: 'บน <span class="tiktok-icon"></span> คุณต้องแตะ <span class="three-dots"></span> แล้วแตะ <span class="highlight">"เปิดในเบราว์เซอร์"</span> เพื่อดาวน์โหลดแอปฟรี'
+            },
+            'tr': {
+                title: IS_ANDROID ? 'Google Play\'de "Wordy" arayın' : 'App Store\'da "Wordy" arayın',
+                download: 'Uygulamayı İndir',
+                popup: '<span class="tiktok-icon"></span>\'da <span class="three-dots"></span> simgesine dokunmanız ve ardından uygulamayı ücretsiz indirmek için <span class="highlight">"Tarayıcıda aç"</span> seçeneğine dokunmanız gerekir.'
+            },
+            'uk': {
+                title: IS_ANDROID ? 'Шукайте "Wordy" в Google Play' : 'Шукайте "Wordy" в App Store',
+                download: 'Завантажити додаток',
+                popup: 'У <span class="tiktok-icon"></span> вам потрібно натиснути на <span class="three-dots"></span> а потім натиснути <span class="highlight">"Відкрити в браузері"</span> щоб завантажити додаток безкоштовно.'
+            },
+            'vi': {
+                title: IS_ANDROID ? 'Tìm "Wordy" trên Google Play' : 'Tìm "Wordy" trên App Store',
+                download: 'Tải ứng dụng',
+                popup: 'Trên <span class="tiktok-icon"></span> bạn cần nhấn vào <span class="three-dots"></span> và sau đó nhấn vào <span class="highlight">"Mở trong trình duyệt"</span> để tải ứng dụng miễn phí.'
+            }
+        };
+
+        function detectUserLanguage() {
+            const browserLang = navigator.language || navigator.userLanguage;
+            const langCode = browserLang.toLowerCase().split('-')[0];
+            
+            if (langCode === 'zh') {
+                const fullLang = browserLang.toLowerCase();
+                if (fullLang.includes('tw') || fullLang.includes('hk') || fullLang.includes('mo')) {
+                    return 'zh_tw';
+                }
+                return 'zh_cn';
+            }
+            
+            return translations[langCode] ? langCode : 'en';
+        }
+
+        function updatePageLanguage() {
+            const lang = detectUserLanguage();
+            const trans = translations[lang];
+            
+            document.querySelector('.title').textContent = trans.title;
+            document.querySelector('.download-button').textContent = trans.download;
+            document.querySelector('.popup').innerHTML = trans.popup;
+            
+            if (lang === 'ar' || lang === 'he') {
+                document.body.style.direction = 'rtl';
+            }
+        }
+
+        // Track manual download button click
+        function trackDownloadClick() {
+            // Direct redirect to OneLink
+            window.location.href = finalURL;
+            return false;
+        }
+        
+        window.addEventListener('DOMContentLoaded', function() {
+            updatePageLanguage();
+            // Update download button href
+            const downloadBtn = document.getElementById('download-btn');
+            if (downloadBtn) {
+                downloadBtn.href = finalURL;
+            }
+        });
+    </script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: white;
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            position: relative;
+        }
+
+        .container {
+            text-align: center;
+            padding: 40px;
+        }
+
+        .app-icon {
+            width: 120px;
+            height: 120px;
+            border-radius: 25px;
+            margin-bottom: 30px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+            background: #f0f0f0;
+            margin-left: auto;
+            margin-right: auto;
+            background-image: url('appicon.png');
+            background-size: contain;
+            background-position: center;
+            background-repeat: no-repeat;
+        }
+
+        .title {
+            font-size: 28px;
+            font-weight: 600;
+            color: black;
+        }
+
+        .popup {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            background: white;
+            border-radius: 20px;
+            padding: 30px;
+            max-width: 350px;
+            width: 300px;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3);
+            z-index: 1000;
+            font-size: 18px;
+            line-height: 1.4;
+            color: #333;
+        }
+
+        .popup::after {
+            content: '';
+            position: absolute;
+            top: -10px;
+            right: 10px;
+            width: 0;
+            height: 0;
+            border-left: 15px solid transparent;
+            border-right: 15px solid transparent;
+            border-bottom: 15px solid white;
+        }
+
+        .tiktok-icon {
+            display: inline-block;
+            width: 25px;
+            height: 25px;
+            background-image: url('tiktokicon.webp');
+            background-size: 80%;
+            background-position: center;
+            background-repeat: no-repeat;
+            border-radius: 50%;
+            margin: 0 5px;
+            vertical-align: middle;
+        }
+
+        .three-dots {
+            display: inline-block;
+            width: 25px;
+            height: 25px;
+            background: #666;
+            border-radius: 50%;
+            margin: 0 5px;
+            position: relative;
+            vertical-align: middle;
+        }
+
+        .three-dots::after {
+            content: '⋯';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: white;
+            font-size: 14px;
+            font-weight: bold;
+        }
+
+        .highlight {
+            color: rgb(0,122,255);
+            font-weight: bold;
+        }
+
+        .download-button {
+            display: inline-block;
+            background: rgb(0,122,255);
+            color: white;
+            padding: 15px 30px;
+            border-radius: 25px;
+            text-decoration: none;
+            font-size: 18px;
+            font-weight: 600;
+            margin-top: 20px;
+            box-shadow: 0 4px 15px rgba(0,122,255,0.3);
+            transition: all 0.3s ease;
+        }
+
+        .download-button:hover {
+            background: rgba(0,122,255,0.9);
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(0,122,255,0.4);
+        }
+
+    </style>
+    <script>
+        // Automatic redirect to OneLink after page loads
+        window.addEventListener('load', function() {
+            setTimeout(function() {
+                window.location.href = finalURL;
+            }, 1000); // 1 second delay to show the page briefly
+        });
+    </script>
+</head>
+<body>
+    
+    <div class="container">
+        <div class="app-icon"></div>
+        <div class="title">Search "Wordy" on the App Store</div>
+        <a href="#" class="download-button" id="download-btn" onclick="trackDownloadClick()">Download App</a>
+    </div>
+
+    <div class="popup">
+        On <span class="tiktok-icon"></span> you need to tap on the <span class="three-dots"></span> and then tap on <span class="highlight">"Open in browser"</span> to download the app for free.
+    </div>
+</body>
+</html>

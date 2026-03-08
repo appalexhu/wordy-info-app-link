@@ -87,8 +87,8 @@
         (function() {
             const urlParams = new URLSearchParams(window.location.search);
             const campaign = urlParams.get('campaign') || urlParams.get('c') || 'default';
-            const influencerPlatform = urlParams.get('platform');
-            const influencer = urlParams.get('influencer');
+            const influencerPlatform = urlParams.get('p') || urlParams.get('platform');
+            const influencer = urlParams.get('i') || urlParams.get('influencer');
             const isInfluencerLink = influencerPlatform && influencer;
 
             if (IS_IOS) {

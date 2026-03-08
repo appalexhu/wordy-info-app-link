@@ -72,42 +72,55 @@
             // Add more campaigns here as needed
             'default': 'https://app.wordy.info/0206/default'
         };
-        
+
+        // Platform to AppsFlyer media source mapping
+        const PLATFORM_MEDIA_SOURCES = {
+            'ig': 'Social_instagram',
+            'fb': 'Social_facebook',
+            'yt': 'Social_youtube',
+            'tt': 'Social_tiktok'
+        };
+
         let finalURL = '';
-        
+
         // Initialize routing based on platform and campaign
         (function() {
             const urlParams = new URLSearchParams(window.location.search);
             const campaign = urlParams.get('campaign') || urlParams.get('c') || 'default';
-            
+            const influencerPlatform = urlParams.get('platform');
+            const influencer = urlParams.get('influencer');
+            const isInfluencerLink = influencerPlatform && influencer;
+
             if (IS_IOS) {
                 // iOS: Direct App Store link to avoid TikTok blocking
                 finalURL = 'https://apps.apple.com/us/app/learn-languages-wordy/id6670703228';
                 console.log('Platform:', 'iOS (TikTok safe mode)');
                 console.log('iOS detected: Using direct App Store link');
-                
-                // Send tracking data to AppsFlyer S2S API
-                // Map specific campaigns to their media sources, default to Social_tiktok for unknown campaigns
-                const campaignMediaSources = {
-                    'language_learning_wordy': 'Social_instagram'
-                    // All other campaigns default to Social_tiktok
-                };
-                
-                const mediaSource = campaignMediaSources[campaign.toLowerCase()] || urlParams.get('pid') || 'Social_tiktok';
-                
+
+                // Determine media source
+                let mediaSource;
+                if (isInfluencerLink) {
+                    mediaSource = PLATFORM_MEDIA_SOURCES[influencerPlatform.toLowerCase()] || 'Social_tiktok';
+                } else {
+                    const campaignMediaSources = {
+                        'language_learning_wordy': 'Social_instagram'
+                    };
+                    mediaSource = campaignMediaSources[campaign.toLowerCase()] || urlParams.get('pid') || 'Social_tiktok';
+                }
+
                 const trackingData = {
                     app_id: 'id6670703228',
                     media_source: mediaSource,
-                    campaign: campaign,
+                    campaign: isInfluencerLink ? influencerPlatform : campaign,
                     af_channel: urlParams.get('af_channel') || 'social',
-                    af_ad: urlParams.get('af_ad') || 'bio_link',
+                    af_ad: urlParams.get('af_ad') || (isInfluencerLink ? 'influencer' : 'bio_link'),
                     af_siteid: window.location.hostname,
                     click_time: new Date().toISOString(),
                     user_agent: navigator.userAgent,
-                    ip: 'auto' // AppsFlyer will detect from request
+                    ip: 'auto'
                 };
-                
-                // Option 1: AppsFlyer Click API (no auth needed)
+
+                // AppsFlyer Click API (no auth needed)
                 const clickUrl = `https://impression.appsflyer.com/${trackingData.app_id}/click`;
                 const clickParams = new URLSearchParams({
                     pid: trackingData.media_source,
@@ -117,65 +130,76 @@
                     af_siteid: trackingData.af_siteid,
                     clickid: Date.now().toString()
                 });
-                
+
+                // Add influencer tracking to click params
+                if (isInfluencerLink) {
+                    clickParams.set('af_sub1', influencer);
+                }
+
                 // Send click event via invisible pixel
                 const img = new Image(1, 1);
                 img.src = clickUrl + '?' + clickParams.toString();
                 img.style.display = 'none';
                 document.body.appendChild(img);
-                
-                // Option 2: Store campaign data in URL parameters for App Store
+
                 // Apple's App Store Analytics campaign tracking
-                const storeParams = new URLSearchParams({
-                    ct: campaign, // Campaign token
-                    mt: '8' // Media type (8 = Web)
-                });
-                
-                // Only add pt if you have Apple Provider Token
-                // pt: 'YOUR_TEAM_ID', // Uncomment and add your Team ID if you have it
-                
-                // Add campaign parameters to App Store URL
-                if (campaign !== 'default') {
+                const ctValue = isInfluencerLink ? `${influencerPlatform}_${influencer}` : campaign;
+                if (ctValue !== 'default') {
+                    const storeParams = new URLSearchParams({
+                        ct: ctValue,
+                        mt: '8'
+                    });
                     finalURL = finalURL + '&' + storeParams.toString();
                 }
-                
+
                 console.log('AppsFlyer tracking sent for iOS:', trackingData);
+                if (isInfluencerLink) {
+                    console.log('Influencer:', influencer, '| Platform:', influencerPlatform);
+                }
             } else {
                 // Android and others: Use OneLink for tracking
-                // Check if campaign exists in predefined list, otherwise use default with campaign parameter
-                if (ONELINK_CAMPAIGNS[campaign.toLowerCase()]) {
-                    finalURL = ONELINK_CAMPAIGNS[campaign.toLowerCase()];
+                if (isInfluencerLink) {
+                    // Influencer link: https://app.wordy.info/0206/{platform}?af_sub1={influencer}
+                    finalURL = `https://app.wordy.info/0206/${influencerPlatform}`;
+                    const passThroughParams = {
+                        af_sub1: influencer,
+                        pid: PLATFORM_MEDIA_SOURCES[influencerPlatform.toLowerCase()] || 'Social_tiktok',
+                        c: influencerPlatform,
+                        af_ad: 'influencer'
+                    };
+                    finalURL = finalURL + '?' + new URLSearchParams(passThroughParams).toString();
+
+                    console.log('Platform:', 'Android/Desktop (Influencer)');
+                    console.log('Influencer:', influencer, '| Platform:', influencerPlatform);
+                    console.log('OneLink URL:', finalURL);
                 } else {
-                    // Use default OneLink but pass the campaign as parameter
-                    finalURL = ONELINK_CAMPAIGNS['default'];
-                }
-                
-                // Add any additional parameters to pass through to OneLink
-                const passThroughParams = {};
-                
-                // Always include the campaign name
-                passThroughParams.c = campaign;
-                
-                // Common AppsFlyer parameters to pass through
-                const allowedParams = ['pid', 'af_channel', 'af_ad', 'af_adset', 'af_sub1', 'af_sub2', 'af_sub3', 'af_sub4', 'af_sub5'];
-                
-                for (let [key, value] of urlParams) {
-                    if (allowedParams.includes(key) || key.startsWith('af_')) {
-                        passThroughParams[key] = value;
+                    // Regular campaign link
+                    if (ONELINK_CAMPAIGNS[campaign.toLowerCase()]) {
+                        finalURL = ONELINK_CAMPAIGNS[campaign.toLowerCase()];
+                    } else {
+                        finalURL = `https://app.wordy.info/0206/${campaign}`;
                     }
+
+                    const passThroughParams = {};
+                    passThroughParams.c = campaign;
+
+                    const allowedParams = ['pid', 'af_channel', 'af_ad', 'af_adset', 'af_sub1', 'af_sub2', 'af_sub3', 'af_sub4', 'af_sub5'];
+                    for (let [key, value] of urlParams) {
+                        if (allowedParams.includes(key) || key.startsWith('af_')) {
+                            passThroughParams[key] = value;
+                        }
+                    }
+
+                    if (!passThroughParams.pid) {
+                        passThroughParams.pid = 'tiktok_bio';
+                    }
+
+                    finalURL = finalURL + '?' + new URLSearchParams(passThroughParams).toString();
+
+                    console.log('Platform:', 'Android/Desktop');
+                    console.log('Campaign:', campaign);
+                    console.log('OneLink URL:', finalURL);
                 }
-                
-                // Add default pid if not provided
-                if (!passThroughParams.pid) {
-                    passThroughParams.pid = 'tiktok_bio';
-                }
-                
-                // Build final URL with parameters
-                finalURL = finalURL + '?' + new URLSearchParams(passThroughParams).toString();
-                
-                console.log('Platform:', 'Android/Desktop');
-                console.log('Campaign:', campaign);
-                console.log('OneLink URL:', finalURL);
             }
         })();
         
